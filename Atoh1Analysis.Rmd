@@ -1,0 +1,380 @@
+---
+title: "Atoh1 Progenitor Analysis"
+author: "Selin Aras"
+date: "2025-11-08"
+output:
+  pdf_document: default
+  html_document: default
+---
+```{r load-packages, message = FALSE, warning = FALSE}
+# load packages
+library(tidyverse)
+library(Seurat)
+library(ggplot2)
+```
+
+
+setwd("/Users/selinaras/Desktop/")
+
+```{r set-wd, message = FALSE, warning = FALSE}
+# check the working directory 
+getwd()
+```
+
+## Load Dataset
+
+```{r load-data}
+# load in dataset
+atoh1.data <- load("/Users/selinaras/Desktop/Atoh1Progenitors.Rdata")
+
+# investigate the dataset - look at first 30 cells
+atoh1.data[1:30]
+
+```
+```{r reassign data variable}
+atoh1 = SubObj
+```
+
+
+
+```{r investigate-Seurat}
+# what happens if we call the object
+head(atoh1, 5)
+
+# look at the cells in the dataset
+head(colnames(atoh1), 5)
+head(Cells(atoh1), 5)
+
+# look at the genes in the dataset
+head(rownames(atoh1), 5)
+head(Features(atoh1), 5)
+
+#what are the slot names
+slotNames(atoh1)
+
+```
+### This tells us that Features (gene) is the row, and cell (cell info) is in the columns
+```{r get expression data}
+#convert to matrix to get expression data
+atoh1_mat <- as.matrix(atoh1@assays$RNA@data)
+atoh1_mat[c("Otx2"), 1:30]
+```
+
+
+
+
+# Conducting Data Analysis
+
+
+```{r visualize dimplot}
+
+# a) by cluster
+DimPlot(atoh1, group.by = "seurat_clusters")
+
+# b) by timepoint
+DimPlot(atoh1, group.by = "TimePoint")
+
+# c) by sample 
+DimPlot(atoh1, group.by = "Sample")
+
+```
+
+
+```{r determine celltypes}
+#check if neuronal and glial marker genes are in dataset
+markers <- c("Rbfox3", "Map2", "Gfap", "S100b", "Olig1", "Olig2")
+markers[markers %in% rownames(atoh1)]
+```
+
+```{r determine celltypes2}
+
+#assigning vector to neuron and glia markers
+neuron_markers <- c("Rbfox3", "Map2")
+glia_markers <- c("Gfap", "S100b", "Olig1", "Olig2")
+
+
+# count how many cells have an expression value above zero for any neuron or glia marker
+neuron_cells <- colSums(atoh1_mat[neuron_markers, ] > 0) > 0
+glia_cells <- colSums(atoh1_mat[glia_markers, ] > 0) > 0
+
+# summarize
+summary_counts <- data.frame(
+  Category = c("Neuron", "Glia"),
+  CellsExpressing = c(sum(neuron_cells), sum(glia_cells))
+)
+
+# view results
+summary_counts
+
+# ggplot barplot
+
+library(viridis)
+
+ggplot(summary_counts, aes(x = Category, y = CellsExpressing, fill = Category)) +
+  geom_col(width = 0.6) +
+  scale_fill_viridis(discrete = TRUE, option = "D") +
+  theme_classic() +
+  labs(
+    title = "Neuron vs Glia Marker Expression",
+    x = "Cell Type",
+    y = "Number of Cells"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 15),
+    legend.position = "none"
+  )
+
+
+
+
+```
+### from the summary counts and graph, we can see that there are more neurons than glia in the dataset
+
+
+```{r determine timepoint}
+
+# extract Otx2 expression and timepoint info for each cell
+otx2_expr <- otx2_values <- atoh1_mat["Otx2", ]
+otx2_expr <- data.frame(
+  Otx2 = otx2_values,
+  TimePoint = atoh1@meta.data$TimePoint
+)
+
+# summarize average expression by timepoint
+otx2_summary <- otx2_expr %>%
+  group_by(TimePoint) %>%
+  summarize(mean_expression = mean(Otx2))
+
+# see which timepoint has the highest average expression
+print(otx2_summary)
+
+# plot
+ggplot(otx2_summary, aes(x = TimePoint, y = mean_expression, fill = TimePoint)) +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  labs(
+    title = "Average Otx2 Expression by Timepoint",
+    x = "Timepoint",
+    y = "Mean Otx2 Expression"
+  ) +
+  theme(legend.position = "none")
+
+
+
+```
+### the graph shows that the E13.5 timepoint has highest expression of Otx2
+
+ Finding cluster biomarkers
+
+```{r differential-gene-exp}
+# set identities to clusters
+Idents(atoh1) <- "seurat_clusters"
+
+# check cluster labels
+levels(atoh1)
+
+# find unique markers for cluster 1
+cluster1.markers <- FindMarkers(atoh1, ident.1 = 1)
+head(cluster1.markers, n = 5)
+
+# sort by average log2 fold change, since average log fold change measures how much higher the expression of a gene is in a cluster compared to the others
+top_genes <- head(cluster1.markers[order(cluster1.markers$avg_log2FC, decreasing = TRUE), ], 5)
+top_genes
+VlnPlot(
+  atoh1,
+  features = rownames(top_genes),
+  pt.size = 0.1,
+  group.by = NULL
+) +
+  theme_classic() +
+  labs(caption = "Top 5 upregulated genes in cluster 1") +
+  theme(
+    plot.caption = element_text(hjust = 0.5, face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "none"
+  )
+```
+###from the table and graph we can see that Car4 is most upregulated in cluster 1
+
+##
+```{r visualize dimplot by cell type}
+
+# color by cell type
+DimPlot(atoh1, group.by = "celltype") +
+ggtitle("Cells Colored by Cell Type") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 18, face = "bold"),
+    legend.position = "right"
+  )
+
+# set identities to cell type
+Idents(atoh1) <- "celltype"
+
+# check cell type labels
+levels(atoh1)
+
+# find markers that distinguish cell types
+celltype1.markers <- FindMarkers(atoh1, ident.1 = "Progenitor", ident.2 = "Intermediate Progenitor")
+head(celltype1.markers, n = 5)
+
+#picking Nusap1 and plotting the expression
+FeaturePlot(atoh1, features = "Nusap1") +
+  scale_color_viridis_c(option = "plasma") +
+  ggtitle("Nusap1 Expression") +
+  theme_bw() +
+  theme(
+    panel.grid = element_blank(),
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 15)
+  )
+```
+### from a average log fold change of 5.38, we can see that Nusap1 is highly expressed in progenitors but lowly expressed in intermediate progenitors
+
+###6 looking at which time points that neuronal (Rbfox3", "Map2") or glial markers ("Gfap", "S100b", "Olig1", "Olig2") show the highest expression
+
+```{r marker time exploration}
+# define markers
+neuron_markers <- c("Rbfox3", "Map2")
+glia_markers <- c("Gfap", "S100b", "Olig1", "Olig2")
+
+# average expression of neuron and glia markers by time point
+markers <- c("Rbfox3","Map2","Gfap","S100b","Olig1","Olig2")
+timepoints <- unique(atoh1$TimePoint)
+
+# empty data frame
+df <- data.frame(
+  TimePoint = character(),
+  Gene = character(),
+  AvgExpression = numeric()
+)
+
+# fill data
+for (tp in timepoints) {
+  cells <- which(atoh1$TimePoint == tp)
+  
+  for (gene in markers) {
+    avg_val <- mean(atoh1_mat[gene, cells])
+    
+    df[nrow(df) + 1, ] <- list(tp, gene, avg_val)  
+  }
+}
+
+# factor and numeric conversion
+df$TimePoint <- factor(df$TimePoint)
+df$AvgExpression <- as.numeric(df$AvgExpression)
+
+# plot
+ggplot(df, aes(x = TimePoint, y = AvgExpression, fill = Gene)) +
+  geom_col(position = "dodge") +
+  theme_bw() +
+  labs(
+    title = "Expression of Neuron and Glia Markers by Time Point",
+    x = "Time Point",
+    y = "Average Expression"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+
+### The plot shows that Map2 is the dominant marker at all stages, with a peak around E13.5, consistent with widespread neuronal differentiation. Rbfox3 (NeuN) remains low early on but increases steadily and reaches its highest level at E16.5, reflecting late neuronal maturation. Glial markers Olig1 and Olig2 show small signals only at the earliest time points (E10.5–E12.5) and then drop to nearly zero. Gfap, also a glial marker, appears only at E16.5 before returning to zero, briefly overlapping with Rbfox3, which likely reflects a short transitional glial state. S100b remains near zero across all time points, which is expected because S100b is a mature astrocyte marker, and this dataset captures much earlier developmental stages (E9.5–E16.5). The absence of S100b expression indicates that astrocytes have not yet reached maturity during these stages.
+
+### now let's look at marker expression over time at progenitors and intermediate progenitors
+
+### by progenitor and intermediate progenitor, put them in the same code chunk to compare side-by-side
+```{r cell type marker time exploration}
+# subset progenitor cells
+prog <- subset(atoh1, celltype == "Progenitor")
+
+# define markers
+markers <- c("Rbfox3","Map2","Gfap","S100b","Olig1","Olig2")
+
+# use only progenitor timepoints
+timepoints <- unique(prog$TimePoint)
+
+# empty data frame
+df_prog <- data.frame(
+  TimePoint = character(),
+  Gene = character(),
+  AvgExpression = numeric()
+)
+
+# fill data
+for (tp in timepoints) {
+  cells <- Cells(prog)[prog$TimePoint == tp]
+  for (gene in markers) {
+    avg_val <- mean(atoh1_mat[gene, cells])
+    df_prog[nrow(df_prog) + 1, ] <- list(tp, gene, avg_val)
+  }
+}
+
+# convert types
+df_prog$TimePoint <- factor(df_prog$TimePoint)
+df_prog$AvgExpression <- as.numeric(df_prog$AvgExpression)
+
+# plot
+ggplot(df_prog, aes(TimePoint, AvgExpression, fill = Gene)) +
+  geom_col(position = "dodge") +
+  theme_bw() +
+  labs(
+    title = "Progenitors: Expression of Neuron and Glia Markers by Time Point",
+    x = "Time Point",
+    y = "Average Expression"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+### intermediate progenitors
+# subset intermediate progenitor cells
+int <- subset(atoh1, celltype == "Intermediate Progenitor")
+
+# define markers
+markers <- c("Rbfox3","Map2","Gfap","S100b","Olig1","Olig2")
+
+# only timepoints present in intermediate progenitors
+timepoints <- unique(int$TimePoint)
+
+# empty data frame
+df_int <- data.frame(
+  TimePoint = character(),
+  Gene = character(),
+  AvgExpression = numeric()
+)
+
+# fill data
+for (tp in timepoints) {
+  cells <- Cells(int)[int$TimePoint == tp]
+
+  for (gene in markers) {
+    avg_val <- mean(atoh1_mat[gene, cells])
+    df_int[nrow(df_int) + 1, ] <- list(tp, gene, avg_val)
+  }
+}
+
+# convert types
+df_int$TimePoint <- factor(df_int$TimePoint)
+df_int$AvgExpression <- as.numeric(df_int$AvgExpression)
+
+# plot
+ggplot(df_int, aes(TimePoint, AvgExpression, fill = Gene)) +
+  geom_col(position = "dodge") +
+  theme_bw() +
+  labs(
+    title = "Intermediate Progenitors: Expression of Neuron and Glia Markers by Time Point",
+    x = "Time Point",
+    y = "Average Expression"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+###
+Interestingly, Map2 is slightly higher in intermediate progenitors at E10.5, but it then drops sharply and stays low until a strong peak at E16.5. In progenitors, Map2 rises earlier, peaking around E13.5 before declining. Rbfox3 is essentially absent in intermediate progenitors but increases toward later stages in progenitors, indicating that neuronal maturation occurs mainly within the progenitor group. Olig1 and Olig2 remain low in both populations, but they appear slightly higher in progenitors, and only at the earlier time pointsm, suggesting a brief early window where progenitors retain limited oligodendroglial potential before committing to a neuronal fate. S100b remains near zero across all time points, for the same reasons as mentioned in the first plot from this problem.
+
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
